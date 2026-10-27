@@ -1,0 +1,64 @@
+name: Android tablet APK (test signing)
+on:
+  workflow_dispatch:
+permissions:
+  contents: read
+jobs:
+  build:
+    runs-on: ubuntu-22.04
+    timeout-minutes: 60
+    steps:
+      - uses: actions/checkout@v4
+        with:
+          persist-credentials: false
+      - uses: actions/setup-java@v4
+        with:
+          distribution: temurin
+          java-version: '17'
+      - uses: subosito/flutter-action@v2
+        with:
+          flutter-version: '3.38.3'
+          channel: stable
+          cache: true
+      - name: Create temporary test signing key
+        shell: bash
+        run: |
+          set -euo pipefail
+          test ! -e simple_live_app/android/key.properties
+          umask 077
+          password="$(openssl rand -hex 24)"
+          echo "::add-mask::$password"
+          keytool -genkeypair -noprompt -keystore "$RUNNER_TEMP/tablet-test.p12" -storetype PKCS12 -storepass "$password" -keypass "$password" -alias tablet-test -keyalg RSA -keysize 2048 -validity 3650 -dname "CN=Simple Live Temporary Test"
+          {
+            echo "storeFile=$RUNNER_TEMP/tablet-test.p12"
+            echo "storePassword=$password"
+            echo "keyPassword=$password"
+            echo "keyAlias=tablet-test"
+          } > simple_live_app/android/key.properties
+      - name: Restore dependencies
+        working-directory: simple_live_app
+        run: flutter pub get
+      - name: Build universal tablet APK
+        working-directory: simple_live_app
+        run: flutter build apk --release --target-platform android-arm,android-arm64,android-x64
+      - name: Verify APK signature and prepare download
+        shell: bash
+        run: |
+          set -euo pipefail
+          signer="$(find "$ANDROID_HOME/build-tools" -name apksigner -type f | sort -V | tail -1)"
+          mkdir -p tablet-apk
+          cp simple_live_app/build/app/outputs/flutter-apk/app-release.apk tablet-apk/simple-live-tablet-test.apk
+          "$signer" verify --verbose --print-certs tablet-apk/simple-live-tablet-test.apk > tablet-apk/signature.txt
+          (cd tablet-apk && sha256sum simple-live-tablet-test.apk > SHA256SUMS.txt)
+          echo 'Temporary test signature: cannot update official app or APKs from previous runs. Back up local app data before uninstalling an older installation. Private signing key is discarded.' > tablet-apk/INSTALL.txt
+          echo 'Download android-tablet-test-apk below. Temporary signature cannot update the official app or previous builds.' >> "$GITHUB_STEP_SUMMARY"
+      - uses: actions/upload-artifact@v4
+        with:
+          name: android-tablet-test-apk
+          path: tablet-apk/
+          if-no-files-found: error
+          retention-days: 14
+      - name: Remove temporary signing material
+        if: always()
+        shell: bash
+        run: rm -f simple_live_app/android/key.properties "$RUNNER_TEMP/tablet-test.p12"
