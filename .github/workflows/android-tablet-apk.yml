@@ -37,7 +37,9 @@ jobs:
           } > simple_live_app/android/key.properties
       - name: Restore dependencies
         working-directory: simple_live_app
-        run: flutter pub add auto_orientation_v2:2.3.6
+        run: |
+          cp ../simple_live_tv_app/pubspec.lock pubspec.lock
+          flutter pub add auto_orientation_v2:2.3.6 dynamic_color:1.8.1
       - name: Build universal tablet APK
         working-directory: simple_live_app
         run: flutter build apk --release --target-platform android-arm,android-arm64,android-x64
